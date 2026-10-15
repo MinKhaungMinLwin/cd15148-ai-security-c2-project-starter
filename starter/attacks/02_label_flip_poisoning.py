@@ -47,27 +47,65 @@ def poison_dataset(source_root, target_root, flip_ratio=0.05, seed=42):
         shutil.rmtree(target_root)
     shutil.copytree(source_root, target_root)
 
-    # TODO: Implement the label flipping logic
-    #
-    # Only flip TRAINING labels — the test set must stay clean so we can
-    # measure the true impact of poisoning on model performance.
-    #
-    # Steps:
-    # 1. For each class in training data ("receipt" and "non_receipt"):
-    #    a. List all image files in the class folder (filter by IMAGE_EXTENSIONS)
-    #    b. Calculate how many to flip: n_flip = int(len(files) * flip_ratio)
-    #    c. Randomly sample n_flip files using random.sample()
-    #    d. Move each selected file to the OPPOSITE class folder using shutil.move()
-    #       (add a "flipped_" prefix to avoid filename collisions)
-    #    e. Track total flipped count
-    #
-    # 2. Print a summary showing:
-    #    - Total training images, number flipped, actual flip rate
-    #    - Image counts per class per split (train/test x receipt/non_receipt)
-    #
-    # Hint: The opposite class of "receipt" is "non_receipt" and vice versa.
-    #        Use os.path.join(target_root, "train", class_name) to build paths.
-    pass
+    # Only the TRAINING split is poisoned; the test set is left untouched.
+    opposite = {"receipt": "non_receipt", "non_receipt": "receipt"}
+
+    # Snapshot the clean per-class file lists BEFORE moving anything, so that
+    # files flipped into a folder are never re-selected for a second flip.
+    train_files = {}
+    for class_name in CLASSES:
+        class_dir = os.path.join(target_root, "train", class_name)
+        train_files[class_name] = [
+            f for f in os.listdir(class_dir)
+            if os.path.isfile(os.path.join(class_dir, f))
+            and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
+        ]
+
+    total_train = sum(len(files) for files in train_files.values())
+    total_flipped = 0
+
+    for class_name in CLASSES:
+        files = train_files[class_name]
+        n_flip = int(len(files) * flip_ratio)
+        if n_flip == 0:
+            continue
+
+        to_flip = random.sample(files, n_flip)
+        src_dir = os.path.join(target_root, "train", class_name)
+        dst_dir = os.path.join(target_root, "train", opposite[class_name])
+
+        for fname in to_flip:
+            src = os.path.join(src_dir, fname)
+            # Prefix encodes the ORIGINAL label so visualize_flip() can pair it
+            # back to the clean source image, and avoids name collisions.
+            dst = os.path.join(dst_dir, f"flipped_{class_name}_{fname}")
+            shutil.move(src, dst)
+            total_flipped += 1
+
+        print(f"[train] {class_name}: flipped {n_flip}/{len(files)} "
+              f"-> {opposite[class_name]}")
+
+    actual_rate = total_flipped / total_train if total_train else 0.0
+    print(f"\nTotal training images: {total_train}")
+    print(f"Labels flipped: {total_flipped} ({actual_rate:.2%})")
+
+    print("\nImage counts per split/class after poisoning:")
+    for split in ["train", "test"]:
+        for class_name in CLASSES:
+            class_dir = os.path.join(target_root, split, class_name)
+            count = len([
+                f for f in os.listdir(class_dir)
+                if os.path.isfile(os.path.join(class_dir, f))
+                and os.path.splitext(f)[1].lower() in IMAGE_EXTENSIONS
+            ]) if os.path.isdir(class_dir) else 0
+            print(f"  {split}/{class_name}: {count}")
+
+    print(f"\nPoisoned dataset created at {target_root}")
+    return {
+        "total_train": total_train,
+        "total_flipped": total_flipped,
+        "flip_ratio": actual_rate,
+    }
 
 
 def visualize_flip(source_root, target_root, num_images=5, output_dir=RESULTS_DIR, seed=42):

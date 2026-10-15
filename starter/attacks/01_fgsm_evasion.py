@@ -47,12 +47,11 @@ def fgsm_attack(image, epsilon, data_grad):
     Returns:
         Perturbed image tensor, clamped to valid pixel range [0, 1]
     """
-    # TODO: Implement the FGSM perturbation formula
-    # 1. Compute the sign of the gradient (data_grad.sign())
-    # 2. Create perturbed image: original + epsilon * sign(gradient)
-    # 3. Clamp the result to [0, 1] to maintain valid pixel values
-    # 4. Return the perturbed image
-    pass
+    # FGSM: x_adv = x + epsilon * sign(grad_x(loss)), clamped to valid pixels.
+    sign_data_grad = data_grad.sign()
+    perturbed_image = image + epsilon * sign_data_grad
+    perturbed_image = torch.clamp(perturbed_image, 0, 1)
+    return perturbed_image
 
 
 def evaluate_fgsm(model_path, test_dir, epsilon):
@@ -88,17 +87,39 @@ def evaluate_fgsm(model_path, test_dir, epsilon):
         image = image.to(DEVICE)
         label_t = label.float().unsqueeze(1).to(DEVICE)
 
-        # TODO: Implement the FGSM attack loop
-        # 1. Enable gradient computation on the input image (image.requires_grad = True)
-        # 2. Forward pass: get model output
-        # 3. Check if clean prediction is correct
-        # 4. Compute BCELoss between output and true label
-        # 5. Zero model gradients, then backpropagate to get input gradients
-        # 6. Apply fgsm_attack() using the input gradient (image.grad.data)
-        # 7. Run the model on the perturbed image (with torch.no_grad())
-        # 8. Check if adversarial prediction is correct
-        # 9. Track: clean_correct, adv_correct, flipped (correct→incorrect), total
-        pass
+        # 1. Enable gradient computation on the input image.
+        image.requires_grad = True
+
+        # 2. Forward pass on the clean image.
+        output = model(image)
+        clean_pred = (output > 0.5).float()
+        clean_is_correct = clean_pred.item() == label_t.item()
+
+        # 3/4. Compute the BCE loss between the prediction and the true label.
+        loss = torch.nn.BCELoss()(output, label_t)
+
+        # 5. Zero model gradients, then backpropagate to the input.
+        model.zero_grad()
+        loss.backward()
+        data_grad = image.grad.data
+
+        # 6. Craft the adversarial example.
+        perturbed_image = fgsm_attack(image, epsilon, data_grad)
+
+        # 7. Re-evaluate the model on the perturbed image.
+        with torch.no_grad():
+            adv_output = model(perturbed_image)
+        adv_pred = (adv_output > 0.5).float()
+        adv_is_correct = adv_pred.item() == label_t.item()
+
+        # 8/9. Track accuracy and attack success (correct -> incorrect flips).
+        total += 1
+        if clean_is_correct:
+            clean_correct += 1
+            if not adv_is_correct:
+                flipped += 1
+        if adv_is_correct:
+            adv_correct += 1
 
     return {
         "epsilon": epsilon,
