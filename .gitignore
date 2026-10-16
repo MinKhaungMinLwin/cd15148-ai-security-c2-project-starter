@@ -11,3 +11,5 @@ _cifar_cache/
 _dataset_cache/
 *.json
 !starter/06_trivy_report.json
+# Attack result JSONs are required submission deliverables — keep them tracked.
+!starter/attacks/results/**/*.json
